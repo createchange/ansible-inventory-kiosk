@@ -1,0 +1,8 @@
+- hosts: pi
+  tasks:
+    - name: get variable
+      shell: cat /etc/default/keyboard
+      register: current_kb_layout
+    - name: ping if conditional true
+      ping:
+      when: current_kb_layout.stdout.find('pc104') != -1

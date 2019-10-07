@@ -1,0 +1,99 @@
+- hosts: pi
+  become: yes
+  tasks:
+
+  - name: Change root password
+    user:
+      name: pi
+      password: $6$mysecretsalt$pjs7HGhUyzPmIEV2I.nuDFBt.5i3cd.fKBQgpxA6.sGShWsOrS3qvInWlvVNtwu8pTjmiQjp6cnCYW7N7Q245/ 
+    become: yes
+
+  - name: Configure autologin
+    block:
+    - name: Set console boot as default environment
+      file: path=/etc/systemd/system/default.target src=/lib/systemd/system/graphical.target state=link
+    - name:  Edit autologin config file
+      replace:
+        path: /etc/systemd/system/autologin@.service
+        regexp: ^ExecStart=-/sbin/getty --autologin [^[:space":]]*
+        replace: ExecStart=-/sbin/agetty --autologin pi
+        backup: yes
+    - name: Symlink autologin config file
+      file:
+        src: /etc/systemd/system/autologin@.service 
+        dest: /etc/systemd/system/getty.target.wants/getty@tty1.service
+        state: link
+        force: yes
+    become: yes
+
+  - name: Fix default keyboard layout
+    replace:
+      path: /etc/default/keyboard
+      regexp: XKBLAYOUT=".+"
+      replace: XKBLAYOUT="us"
+      backup: yes
+    become: yes
+
+  - name: Set timezone to US/Central
+    timezone:
+      name: US/Central
+    become: yes
+
+  - name: Configure locale
+    locale_gen:
+      name: en_US.UTF-8
+      state: present
+     
+  - name: Update apt and upgrade system
+    become: yes
+    apt: update_cache=yes upgrade=yes
+
+  - name: Install list of packages
+    become: yes
+    apt: name={{item}} state=present install_recommends=no
+    with_items:
+      - xserver-xorg
+      - x11-xserver-utils
+      - xinit
+      - openbox
+      - chromium-browser
+
+  - name: Edit openbox autostart config
+    blockinfile:
+      path: /etc/xdg/openbox/autostart
+      marker: "#### {mark} ANSIBLE MANAGED BLOCK ####"
+      block: |
+
+        # Disable any form of screen saver / screen blanking / power management
+        xset s off
+        xset s noblank
+        xset -dpms
+        
+        # Allow quitting the X server with CTRL-ATL-Backspace
+        setxkbmap -option terminate:ctrl_alt_bksp
+        
+        # Start Chromium in kiosk mode
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/' ~/.config/chromium/'Local State'
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]\+"/"exit_type":"Normal"/' ~/.config/chromium/Default/Preferences
+        chromium-browser --disable-infobars --kiosk 'inventory.intinc.com'
+    become: yes
+  
+  - name: Configure kiosk start on boot
+    lineinfile:
+      path: /home/pi/.bash_profile
+      line: '[[ -z $DISPLAY && $XDG_VTNR -eq 1 ]] && startx'
+      state: present
+      create: yes
+
+  - name: Restart machine
+    shell: "sleep 5 && sudo shutdown -r now"
+    async: 1
+    poll: 0
+
+  - name: Wait for machine to come back up
+    wait_for_connection:
+      connect_timeout: 20
+      sleep: 5
+      delay: 5
+      timeout: 300
+
